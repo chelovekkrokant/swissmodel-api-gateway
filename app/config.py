@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     port: int = 10002
     api_key: str
     base_url: str
+    automodel_url: str
 
     class Config:
         env_file = ".env"
