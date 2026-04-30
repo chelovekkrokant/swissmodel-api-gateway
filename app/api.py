@@ -18,7 +18,6 @@ async def predict(
     if template is not None and not template.filename.endswith(".pdb"):
         raise HTTPException(status_code=400, detail="template file must have .pdb extension")
 
-    template_path = "none"
     temp_dir = create_temp_dir()
 
     try:
@@ -33,14 +32,10 @@ async def predict(
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
 
-    project_id = await submit_automodel(sequence)
-
-    if not project_id:
-        raise HTTPException(status_code=500, detail="Failed to submit automodel")
-
-    results = await fetch_results(project_id)
-
-    if not results:
-        raise HTTPException(status_code=500, detail="Failed to fetch results")
+    try:
+        project_id = await submit_automodel(sequence)
+        results = await fetch_results(project_id)
+    except (RuntimeError, TimeoutError) as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
     return results
