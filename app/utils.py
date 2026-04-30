@@ -29,4 +29,6 @@ def parse_fasta(path: str) -> list[str]:
                 current.append(line)
     if current:
         sequences.append("".join(current))
+    if not len(sequences):
+        raise OSError("Sequences not found")
     return sequences
