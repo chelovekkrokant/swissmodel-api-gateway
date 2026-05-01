@@ -1,7 +1,8 @@
 import os
 import tempfile
+from typing import Optional
 
-from fastapi import UploadFile
+from fastapi import UploadFile, File, HTTPException
 
 
 def create_temp_dir() -> str:
@@ -32,3 +33,9 @@ def parse_fasta(path: str) -> list[str]:
     if not len(sequences):
         raise OSError("Sequences not found")
     return sequences
+
+def validate_files(fasta: File, template: Optional[File] = None):
+    if not fasta.filename.endswith(".fasta"):
+        raise HTTPException(status_code=400, detail="fasta file must have .fasta extension")
+    if template is not None and not template.filename.endswith(".pdb"):
+        raise HTTPException(status_code=400, detail="template file must have .pdb extension")
