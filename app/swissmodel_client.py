@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import logging
 
 import httpx
@@ -61,3 +62,10 @@ async def fetch_results(project_id: str) -> dict:
             raise RuntimeError(f"No status field in response: {data}")
 
     raise TimeoutError(f"Job did not complete in {settings.max_wait_time}s")
+
+async def download_pdb(coordinates_url: str) -> bytes:
+    response = await _client.get(url=coordinates_url)
+    if not str(response.status_code).startswith("2"):
+        raise RuntimeError(f"Failed to download PDB: status={response.status_code}")
+    logger.info(f"Downloaded PDB from {coordinates_url}")
+    return gzip.decompress(response.content)
