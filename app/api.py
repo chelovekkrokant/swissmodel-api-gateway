@@ -22,6 +22,7 @@ async def predict(
         fasta: Optional[UploadFile] = File(None),
         template: Optional[UploadFile] = File(None),
 ):
+    # Уникальный id для этого запроса, изолирован в asyncio-task, не виден другим запросам
     request_id_var.set(uuid.uuid4().hex[:8])
 
     if fasta is None:
@@ -32,6 +33,7 @@ async def predict(
     validate_files(fasta, template)
     temp_dir = create_temp_dir()
 
+    # finally гарантирует удаление temp_dir даже при любом исключении внутри
     try:
         try:
             fasta_path = await save_upload_file(fasta, temp_dir)
@@ -48,6 +50,7 @@ async def predict(
 
         try:
             if template is not None:
+                # Режим B: шаблон задаётся пользователем, API принимает только одну последовательность
                 if len(sequences) > 1:
                     raise HTTPException(
                         status_code=400,
@@ -58,6 +61,7 @@ async def predict(
                 logger.info("Mode B (user template): sequences=1")
                 project_id = await submit_user_template(sequences[0], template_pdb)
             else:
+                # Режим A: SWISS-MODEL сам подберёт шаблон по базе данных
                 logger.info(f"Mode A (automodel): sequences={len(sequences)}")
                 project_id = await submit_automodel(sequences)
 
@@ -67,6 +71,7 @@ async def predict(
         except TimeoutError as e:
             raise HTTPException(status_code=504, detail=str(e))
 
+        # None означает FAILED от SWISS-MODEL, код ошибки зависит от режима
         if results is None:
             if template is None:
                 raise HTTPException(status_code=404, detail="No suitable templates found")
