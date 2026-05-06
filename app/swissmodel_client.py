@@ -14,7 +14,8 @@ _client: httpx.AsyncClient | None = None
 def init_client():
     global _client
     _client = httpx.AsyncClient(
-        headers={"Authorization": f"Token {settings.swissmodel_api_key}"}
+        headers={"Authorization": f"Token {settings.swissmodel_api_key}"},
+        timeout=httpx.Timeout(60.0, connect=10.0),
     )
 
 
@@ -38,13 +39,30 @@ async def submit_automodel(sequences: list[str]) -> str:
     return project_id
 
 
+async def submit_user_template(sequence: str, template_pdb: str) -> str:
+    response = await _client.post(
+        url=settings.template_upload_url,
+        json={
+            "target_sequences": sequence,
+            "template_coordinates": template_pdb,
+            "project_title": "predict-service user template",
+        },
+    )
+    if not str(response.status_code).startswith("2"):
+        raise RuntimeError(f"Submission failed: {response.status_code} {response.text}")
+    data = response.json()
+    project_id = data.get("project_id")
+    if not project_id:
+        raise RuntimeError(f"No project_id in response: {data}")
+    logger.info(f"Submitted user template: status_code={response.status_code}, project_id={project_id}")
+    return project_id
+
+
 async def fetch_results(project_id: str) -> dict:
     max_attempts = settings.max_wait_time // settings.poll_interval
     url = settings.project_status_url.format(project_id=project_id)
 
     for attempt in range(max_attempts):
-        await asyncio.sleep(settings.poll_interval)
-
         response = await _client.get(url=url)
 
         if not str(response.status_code).startswith("2"):
@@ -60,6 +78,8 @@ async def fetch_results(project_id: str) -> dict:
             raise RuntimeError(f"Job failed: {data}")
         if status is None:
             raise RuntimeError(f"No status field in response: {data}")
+
+        await asyncio.sleep(settings.poll_interval)
 
     raise TimeoutError(f"Job did not complete in {settings.max_wait_time}s")
 

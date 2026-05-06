@@ -1,10 +1,16 @@
+import shutil
 from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import Response
-from starlette import status
 
-from app.swissmodel_client import submit_automodel, fetch_results, download_pdb, logger
+from app.swissmodel_client import (
+    submit_automodel,
+    submit_user_template,
+    fetch_results,
+    download_pdb,
+    logger,
+)
 from app.utils import create_temp_dir, save_upload_file, parse_fasta, validate_files
 
 api_router = APIRouter()
@@ -23,41 +29,58 @@ async def predict(
     temp_dir = create_temp_dir()
 
     try:
-        fasta_path = await save_upload_file(fasta, temp_dir)
-        if template is not None:
-            template_path = await save_upload_file(template, temp_dir)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+        try:
+            fasta_path = await save_upload_file(fasta, temp_dir)
+            template_path = None
+            if template is not None:
+                template_path = await save_upload_file(template, temp_dir)
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
 
-    try:
-        sequence = parse_fasta(fasta_path)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
+        try:
+            sequences = parse_fasta(fasta_path)
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
 
-    try:
-        project_id = await submit_automodel(sequence)
-        results = await fetch_results(project_id)
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except TimeoutError as e:
-        raise HTTPException(status_code=504, detail=str(e))
+        try:
+            if template is not None:
+                if len(sequences) > 1:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Template mode requires a single sequence in FASTA",
+                    )
+                with open(template_path) as f:
+                    template_pdb = f.read()
+                logger.info("Mode B (user template): sequences=1")
+                project_id = await submit_user_template(sequences[0], template_pdb)
+            else:
+                logger.info(f"Mode A (automodel): sequences={len(sequences)}")
+                project_id = await submit_automodel(sequences)
 
-    models = results.get("models", [])
-    if not models:
-        raise HTTPException(status_code=404, detail="No models found")
+            results = await fetch_results(project_id)
+        except RuntimeError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        except TimeoutError as e:
+            raise HTTPException(status_code=504, detail=str(e))
 
-    coordinates_url = models[0].get("coordinates_url")
-    if not coordinates_url:
-        raise HTTPException(status_code=500, detail="No coordinates_url in model response")
+        models = results.get("models", [])
+        if not models:
+            raise HTTPException(status_code=404, detail="No models found")
 
-    try:
-        pdb_bytes = await download_pdb(coordinates_url)
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        coordinates_url = models[0].get("coordinates_url")
+        if not coordinates_url:
+            raise HTTPException(status_code=500, detail="No coordinates_url in model response")
 
-    logger.info(f"Returning PDB for project_id={project_id}")
-    return Response(
-        status_code=status.HTTP_200_OK,
-        content=pdb_bytes,
-        headers={"Content-Disposition": "attachment; filename=result.pdb"},
-    )
+        try:
+            pdb_bytes = await download_pdb(coordinates_url)
+        except RuntimeError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+        logger.info(f"Returning PDB for project_id={project_id}")
+        return Response(
+            content=pdb_bytes,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": 'attachment; filename="result.pdb"'},
+        )
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
