@@ -1,4 +1,5 @@
 import shutil
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
@@ -10,6 +11,7 @@ from app.swissmodel_client import (
     fetch_results,
     download_pdb,
     logger,
+    request_id_var,
 )
 from app.utils import create_temp_dir, save_upload_file, parse_fasta, validate_files
 
@@ -20,6 +22,8 @@ async def predict(
         fasta: Optional[UploadFile] = File(None),
         template: Optional[UploadFile] = File(None),
 ):
+    request_id_var.set(uuid.uuid4().hex[:8])
+
     if fasta is None:
         raise HTTPException(status_code=400, detail="fasta file required")
 
@@ -63,6 +67,11 @@ async def predict(
         except TimeoutError as e:
             raise HTTPException(status_code=504, detail=str(e))
 
+        if results is None:
+            if template is None:
+                raise HTTPException(status_code=404, detail="No suitable templates found")
+            raise HTTPException(status_code=500, detail="Job failed for user template")
+
         models = results.get("models", [])
         if not models:
             raise HTTPException(status_code=404, detail="No models found")
@@ -76,7 +85,7 @@ async def predict(
         except RuntimeError as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-        logger.info(f"Returning PDB for project_id={project_id}")
+        logger.info(f"Returning PDB for project_id={project_id}: size={len(pdb_bytes)} bytes")
         return Response(
             content=pdb_bytes,
             media_type="application/octet-stream",

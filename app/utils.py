@@ -2,7 +2,7 @@ import os
 import tempfile
 from typing import Optional
 
-from fastapi import UploadFile, File, HTTPException
+from fastapi import UploadFile, HTTPException
 
 
 def create_temp_dir() -> str:
@@ -10,7 +10,10 @@ def create_temp_dir() -> str:
 
 
 async def save_upload_file(upload_file: UploadFile, directory: str) -> str:
-    path = os.path.join(directory, upload_file.filename)
+    safe_name = os.path.basename(upload_file.filename or "")
+    if not safe_name:
+        raise OSError("Invalid filename")
+    path = os.path.join(directory, safe_name)
     with open(path, "wb") as f:
         f.write(await upload_file.read())
     return path
@@ -34,7 +37,7 @@ def parse_fasta(path: str) -> list[str]:
         raise OSError("Sequences not found")
     return sequences
 
-def validate_files(fasta: File, template: Optional[File] = None):
+def validate_files(fasta: UploadFile, template: Optional[UploadFile] = None):
     if not fasta.filename.endswith(".fasta"):
         raise HTTPException(status_code=400, detail="fasta file must have .fasta extension")
     if template is not None and not template.filename.endswith(".pdb"):

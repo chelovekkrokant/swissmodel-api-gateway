@@ -4,9 +4,23 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api import api_router
-from app.swissmodel_client import init_client, close_client
+from app.swissmodel_client import init_client, close_client, request_id_var
 
-logging.basicConfig(level=logging.INFO)
+
+class _RequestIdFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = request_id_var.get()
+        return True
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)-8s [req=%(request_id)s] %(name)s: %(message)s",
+)
+for _h in logging.getLogger().handlers:
+    _h.addFilter(_RequestIdFilter())
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
